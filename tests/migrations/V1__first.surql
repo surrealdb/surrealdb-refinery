@@ -1,0 +1,9 @@
+BEGIN;
+
+DEFINE TABLE table_1 SCHEMAFULL;
+DEFINE FIELD field_1 ON table_1 TYPE string;
+
+DEFINE TABLE table_2 SCHEMAFULL;
+DEFINE FIELD field_1 ON table_2 TYPE int;
+
+COMMIT;

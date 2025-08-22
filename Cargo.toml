@@ -1,0 +1,23 @@
+[package]
+name = "surrealdb_refinery"
+edition = "2024"
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+log = "0.4.14"
+tokio = { version = "1", features = ["full"] }
+refinery = { git = "https://github.com/manelmontilla/refinery", branch = "surql-files" }
+refinery-core = { git = "https://github.com/manelmontilla/refinery", branch = "surql-files", features = [
+    "futures",
+] }
+surrealdb = { version = "2.3.7" }
+anyhow = "1.0.99"
+time = { version = "0.3.41", features = ["formatting", "parsing"] }
+chrono = { version = "0.4.41", features = ["serde"] }
+async-trait = "0.1.89"
+
+[dev-dependencies]
+env_logger = "0.11.8"
+maplit = "1.0.2"
+serde_json = "1.0.143"
+surrealdb = { version = "2.3.7", features = ["kv-mem"] }
+testing_logger = "0.1.1"
