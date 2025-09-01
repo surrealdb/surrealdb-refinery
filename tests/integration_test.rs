@@ -16,7 +16,7 @@ async fn test_applies_migrations() {
     db.use_ns("test").await.unwrap();
     db.use_db("test").await.unwrap();
     let db2 = db.clone();
-    let mut connection = MigrationConnection(db);
+    let mut connection = MigrationConnection(&db);
     runner.run_async(&mut connection).await.unwrap();
 
     let mut res = db2.query("INFO FOR DB").await.unwrap();
@@ -58,7 +58,7 @@ async fn test_applies_migrations_only_once() {
     let db = surrealdb::engine::any::connect("memory").await.unwrap();
     db.use_ns("test").await.unwrap();
     db.use_db("test").await.unwrap();
-    let mut connection = MigrationConnection(db);
+    let mut connection = MigrationConnection(&db);
     let _ = runner.run_async(&mut connection).await.unwrap();
     let _ = runner.run_async(&mut connection).await.unwrap();
 

@@ -84,7 +84,7 @@ impl From<MigrationInner> for Migration {
     }
 }
 
-pub struct MigrationConnection(pub Surreal<Any>);
+pub struct MigrationConnection<'a>(pub &'a Surreal<Any>);
 
 pub struct SurrealError {
     inner: anyhow::Error,
@@ -139,7 +139,7 @@ impl From<HashMap<usize, surrealdb::Error>> for SurrealError {
 }
 
 #[async_trait]
-impl AsyncTransaction for MigrationConnection {
+impl AsyncTransaction for MigrationConnection<'_> {
     type Error = SurrealError;
 
     async fn execute<'a, T: Iterator<Item = &'a str> + Send>(
@@ -164,7 +164,7 @@ impl AsyncTransaction for MigrationConnection {
 }
 
 #[async_trait]
-impl AsyncQuery<Vec<Migration>> for MigrationConnection {
+impl AsyncQuery<Vec<Migration>> for MigrationConnection<'_> {
     async fn query(
         &mut self,
         query: &str,
@@ -177,7 +177,7 @@ impl AsyncQuery<Vec<Migration>> for MigrationConnection {
 }
 
 #[async_trait]
-impl AsyncMigrate for MigrationConnection {
+impl AsyncMigrate for MigrationConnection<'_> {
     fn assert_migrations_table_query(migration_table_name: &str) -> String {
         format!(
             "
