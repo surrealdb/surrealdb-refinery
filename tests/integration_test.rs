@@ -2,7 +2,7 @@ use maplit::hashmap;
 use refinery::embed_migrations;
 use serde_json;
 use std::collections::HashMap;
-use surrealdb::Value;
+use surrealdb::types::Value;
 use surrealdb_refinery::MigrationConnection;
 
 #[tokio::test]
@@ -12,7 +12,10 @@ async fn test_applies_migrations() {
     embed_migrations!("tests/migrations");
 
     let runner = migrations::runner();
-    let db = surrealdb::engine::any::connect("memory").await.unwrap();
+    let db = match surrealdb::engine::any::connect("mem://").await {
+        Ok(db) => db,
+        Err(e) => panic!("Failed to connect to SurrealDB from mem://: {}", e),
+    };
     db.use_ns("test").await.unwrap();
     db.use_db("test").await.unwrap();
     let db2 = db.clone();
@@ -55,11 +58,15 @@ async fn test_applies_migrations_only_once() {
     embed_migrations!("tests/migrations");
 
     let runner = migrations::runner();
-    let db = surrealdb::engine::any::connect("memory").await.unwrap();
+    let db = match surrealdb::engine::any::connect("mem://").await {
+        Ok(db) => db,
+        Err(e) => panic!("Failed to connect to SurrealDB: {}", e),
+    };
     db.use_ns("test").await.unwrap();
     db.use_db("test").await.unwrap();
     let mut connection = MigrationConnection(&db);
-    let _ = runner.run_async(&mut connection).await.unwrap();
+    let report = runner.run_async(&mut connection).await.unwrap();
+    println!("First run report: {:?}", report);
     let _ = runner.run_async(&mut connection).await.unwrap();
 
     // This ensures that refinery emitted the 'no migrations to apply' log,

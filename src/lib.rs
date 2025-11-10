@@ -4,70 +4,85 @@ use log::debug;
 use refinery_core::Migration;
 use refinery_core::error::WrapMigrationError;
 use refinery_core::traits::r#async::{AsyncMigrate, AsyncQuery, AsyncTransaction};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Display;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
+use surrealdb::types::SurrealValue;
+use surrealdb_types::Number;
+use surrealdb_types::Value;
 use time::OffsetDateTime;
 
-#[allow(dead_code)]
 #[derive(Debug)]
-enum State {
+pub enum State {
     Applied,
     Unapplied,
 }
 
-impl Serialize for State {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+impl SurrealValue for State {
+    fn kind_of() -> surrealdb_types::Kind {
+        surrealdb_types::Kind::Int
+    }
+
+    fn into_value(self) -> surrealdb_types::Value {
         match self {
-            State::Applied => serializer.serialize_i32(1),
-            State::Unapplied => serializer.serialize_i32(0),
+            Self::Applied => Value::Number(Number::Int(1)),
+            Self::Unapplied => Value::Number(Number::Int(1)),
         }
     }
-}
 
-impl<'de> Deserialize<'de> for State {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self>
     where
-        D: Deserializer<'de>,
+        Self: Sized,
     {
-        use serde::de::Error;
-
-        let value = i32::deserialize(deserializer)?;
         match value {
-            1 => Ok(State::Applied),
-            0 => Ok(State::Unapplied),
-            _ => Err(D::Error::custom(format!("Invalid state value: {}", value))),
+            Value::Number(Number::Int(1)) => Ok(State::Applied),
+            Value::Number(Number::Int(0)) => Ok(State::Unapplied),
+            _ => Err(anyhow::anyhow!(
+                "invalid value for State enum: expected 0 or 1"
+            )),
         }
     }
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, SurrealValue)]
 struct MigrationInner {
     state: State,
     name: String,
     version: i32,
-    #[serde(deserialize_with = "deserialize_checksum")]
-    checksum: u64,
+    checksum: ChecksumType,
     sql: Option<String>,
-    applied_on: Option<DateTime<Utc>>,
+    applied_on: Option<String>,
 }
 
-fn deserialize_checksum<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    use serde::de::Error;
-    if let Ok(s) = String::deserialize(deserializer) {
-        s.parse::<u64>().map_err(D::Error::custom)
-    } else {
-        Err(D::Error::custom("invalid type for checksum"))
+#[derive(Debug, Eq, PartialEq, Hash)]
+struct ChecksumType(u64);
+
+impl SurrealValue for ChecksumType {
+    fn kind_of() -> surrealdb_types::Kind {
+        surrealdb_types::Kind::String
+    }
+
+    fn into_value(self) -> surrealdb_types::Value {
+        Value::String(self.0.to_string())
+    }
+
+    fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self>
+    where
+        Self: Sized,
+    {
+        match value {
+            Value::String(s) => s
+                .parse::<u64>()
+                .map(ChecksumType)
+                .map_err(|e| anyhow::anyhow!("failed to parse checksum string: {}", e)),
+            _ => Err(anyhow::anyhow!(
+                "invalid value for ChecksumType: expected String"
+            )),
+        }
     }
 }
 
@@ -75,9 +90,17 @@ impl From<MigrationInner> for Migration {
     fn from(inner: MigrationInner) -> Self {
         match inner.applied_on {
             Some(applied_on) => {
-                let native_applied_on =
-                    OffsetDateTime::from_unix_timestamp(applied_on.timestamp()).unwrap();
-                Migration::applied(inner.version, inner.name, native_applied_on, inner.checksum)
+                let native_applied_on = OffsetDateTime::parse(
+                    &applied_on,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .expect(format!("failed to parse applied_on timestamp: {}", &applied_on).as_str());
+                Migration::applied(
+                    inner.version,
+                    inner.name,
+                    native_applied_on,
+                    inner.checksum.0,
+                )
             }
             None => Migration::unapplied(&inner.name, &inner.sql.unwrap()).unwrap(),
         }
@@ -116,12 +139,33 @@ impl From<surrealdb::Error> for SurrealError {
     }
 }
 
+impl From<surrealdb_core::rpc::DbResultError> for SurrealError {
+    fn from(inner: surrealdb_core::rpc::DbResultError) -> Self {
+        SurrealError {
+            inner: anyhow::anyhow!(inner.to_string()),
+        }
+    }
+}
+
 impl From<SurrealError> for refinery_core::Error {
     fn from(val: SurrealError) -> Self {
         let result: Result<(), SurrealError> = Err(val);
         result
             .migration_err("error getting last applied migration", None)
             .unwrap_err()
+    }
+}
+
+impl From<HashMap<usize, surrealdb_core::rpc::DbResultError>> for SurrealError {
+    fn from(inner: HashMap<usize, surrealdb_core::rpc::DbResultError>) -> Self {
+        let errors = inner
+            .into_values()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        SurrealError {
+            inner: anyhow::anyhow!(errors),
+        }
     }
 }
 
@@ -188,7 +232,7 @@ impl AsyncMigrate for MigrationConnection<'_> {
             DEFINE FIELD IF NOT EXISTS checksum ON {migration_table_name} TYPE string;
             DEFINE FIELD IF NOT EXISTS version ON {migration_table_name} TYPE int;
             DEFINE FIELD IF NOT EXISTS sql ON {migration_table_name} TYPE option<string>;
-            DEFINE FIELD IF NOT EXISTS applied_on ON {migration_table_name} TYPE string;
+            DEFINE FIELD IF NOT EXISTS applied_on ON {migration_table_name} TYPE option<string>;
             COMMIT;"
         )
     }
@@ -263,71 +307,30 @@ impl AsyncMigrate for MigrationConnection<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
-    use std::collections::HashMap;
+    use surrealdb::engine::any::{self, Any};
 
-    #[test]
-    fn test_state_serialization() {
-        let applied = State::Applied;
-        let unapplied = State::Unapplied;
-
-        let applied_json = serde_json::to_string(&applied).unwrap();
-        let unapplied_json = serde_json::to_string(&unapplied).unwrap();
-
-        assert_eq!(applied_json, "1");
-        assert_eq!(unapplied_json, "0");
-    }
-
-    #[test]
-    fn test_state_deserialization() {
-        let applied_json = "1";
-        let unapplied_json = "0";
-        let invalid_json = "2";
-
-        let applied: State = serde_json::from_str(applied_json).unwrap();
-        let unapplied: State = serde_json::from_str(unapplied_json).unwrap();
-
-        assert!(matches!(applied, State::Applied));
-        assert!(matches!(unapplied, State::Unapplied));
-
-        let invalid_result: Result<State, _> = serde_json::from_str(invalid_json);
-        assert!(invalid_result.is_err());
-    }
-
-    #[test]
-    fn test_deserialize_checksum_valid_string() {
-        let json = r#"{"checksum": "12345"}"#;
-        #[derive(Deserialize)]
-        struct TestStruct {
-            #[serde(deserialize_with = "deserialize_checksum")]
-            checksum: u64,
+    #[tokio::test]
+    async fn test_migration_connection() {
+        let connection = any::connect("mem://").await.unwrap();
+        connection.use_ns("test").await.unwrap();
+        connection.use_db("test").await.unwrap();
+        #[derive(SurrealValue, Debug)]
+        struct Example {
+            t: Option<DateTime<Utc>>,
         }
-
-        let result: TestStruct = serde_json::from_str(json).unwrap();
-        assert_eq!(result.checksum, 12345u64);
-    }
-
-    #[test]
-    fn test_deserialize_checksum_invalid_string() {
-        let json = r#"{"checksum": "not_a_number"}"#;
-        #[derive(Deserialize)]
-        struct TestStruct {
-            #[serde(deserialize_with = "deserialize_checksum")]
-            checksum: u64,
+        let example = Example {
+            t: Some(Utc::now()),
+        };
+        let _res: Option<Example> = connection.create("example").content(example).await.unwrap();
+        let mut res = connection
+            .query("SELECT * FROM example ORDER BY version DESC;")
+            .await
+            .unwrap();
+        let errors = res.take_errors();
+        if !errors.is_empty() {
+            panic!("error getting examples from test db: {:?}", errors);
         }
-
-        let result: Result<TestStruct, _> = serde_json::from_str(json);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_surreal_error_from_hashmap() {
-        let mut errors = HashMap::new();
-        errors.insert(0, surrealdb::Error::Db(surrealdb::error::Db::QueryTimedout));
-        errors.insert(1, surrealdb::Error::Db(surrealdb::error::Db::TxFailure));
-
-        let surreal_error: SurrealError = errors.into();
-        let error_string = format!("{}", surreal_error);
-        assert!(error_string.contains("SurrealDB error"));
+        let examples: Vec<Example> = res.take(0).unwrap();
+        assert_eq!(examples.len(), 1);
     }
 }

@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = surrealdb::engine::any::connect("memory").await.unwrap();
     db.use_ns("ns").await.unwrap();
     db.use_db("app").await.unwrap();
-    let mut connection = MigrationConnection(db);
+    let mut connection = MigrationConnection(&db);
     let runner = refinery::Runner::new(&migrations);
 
     // Run migrations
