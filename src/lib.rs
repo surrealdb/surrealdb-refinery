@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use log::debug;
 use refinery_core::Migration;
 use refinery_core::error::WrapMigrationError;
@@ -11,6 +10,7 @@ use std::fmt::Display;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use surrealdb::types::SurrealValue;
+use surrealdb_types::Error as TypesError;
 use surrealdb_types::Number;
 use surrealdb_types::Value;
 use time::OffsetDateTime;
@@ -33,15 +33,15 @@ impl SurrealValue for State {
         }
     }
 
-    fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self>
+    fn from_value(value: surrealdb_types::Value) -> Result<Self, TypesError>
     where
         Self: Sized,
     {
         match value {
             Value::Number(Number::Int(1)) => Ok(State::Applied),
             Value::Number(Number::Int(0)) => Ok(State::Unapplied),
-            _ => Err(anyhow::anyhow!(
-                "invalid value for State enum: expected 0 or 1"
+            _ => Err(TypesError::thrown(
+                "invalid valued for State enum: expected 0 or 1".to_string(),
             )),
         }
     }
@@ -70,7 +70,7 @@ impl SurrealValue for ChecksumType {
         Value::String(self.0.to_string())
     }
 
-    fn from_value(value: surrealdb_types::Value) -> anyhow::Result<Self>
+    fn from_value(value: surrealdb_types::Value) -> Result<Self, TypesError>
     where
         Self: Sized,
     {
@@ -78,10 +78,10 @@ impl SurrealValue for ChecksumType {
             Value::String(s) => s
                 .parse::<u64>()
                 .map(ChecksumType)
-                .map_err(|e| anyhow::anyhow!("failed to parse checksum string: {}", e)),
-            _ => Err(anyhow::anyhow!(
+                .map_err(|e| TypesError::thrown(format!("failed to parse checksum string: {}", e))),
+            _ => Err(TypesError::thrown(format!(
                 "invalid value for ChecksumType: expected String"
-            )),
+            ))),
         }
     }
 }
@@ -110,7 +110,7 @@ impl From<MigrationInner> for Migration {
 pub struct MigrationConnection<'a>(pub &'a Surreal<Any>);
 
 pub struct SurrealError {
-    inner: anyhow::Error,
+    inner: TypesError,
 }
 
 impl Display for SurrealError {
@@ -133,19 +133,15 @@ impl std::error::Error for SurrealError {
 
 impl From<surrealdb::Error> for SurrealError {
     fn from(inner: surrealdb::Error) -> Self {
-        SurrealError {
-            inner: anyhow::anyhow!(inner),
-        }
+        SurrealError { inner }
     }
 }
 
-impl From<surrealdb_core::rpc::DbResultError> for SurrealError {
-    fn from(inner: surrealdb_core::rpc::DbResultError) -> Self {
-        SurrealError {
-            inner: anyhow::anyhow!(inner.to_string()),
-        }
-    }
-}
+// impl From<TypesError> for SurrealError {
+//     fn from(inner: TypesError) -> Self {
+//         SurrealError { inner }
+//     }
+// }
 
 impl From<SurrealError> for refinery_core::Error {
     fn from(val: SurrealError) -> Self {
@@ -156,31 +152,31 @@ impl From<SurrealError> for refinery_core::Error {
     }
 }
 
-impl From<HashMap<usize, surrealdb_core::rpc::DbResultError>> for SurrealError {
-    fn from(inner: HashMap<usize, surrealdb_core::rpc::DbResultError>) -> Self {
+impl From<HashMap<usize, TypesError>> for SurrealError {
+    fn from(inner: HashMap<usize, TypesError>) -> Self {
         let errors = inner
             .into_values()
             .map(|e| e.to_string())
             .collect::<Vec<_>>()
             .join(", ");
         SurrealError {
-            inner: anyhow::anyhow!(errors),
+            inner: TypesError::thrown(errors),
         }
     }
 }
 
-impl From<HashMap<usize, surrealdb::Error>> for SurrealError {
-    fn from(inner: HashMap<usize, surrealdb::Error>) -> Self {
-        let errors = inner
-            .into_values()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        SurrealError {
-            inner: anyhow::anyhow!(errors),
-        }
-    }
-}
+// impl From<HashMap<usize, surrealdb::Error>> for SurrealError {
+//     fn from(inner: HashMap<usize, surrealdb::Error>) -> Self {
+//         let errors = inner
+//             .into_values()
+//             .map(|e| e.to_string())
+//             .collect::<Vec<_>>()
+//             .join(", ");
+//         SurrealError {
+//             inner: TypesError::thrown(errors),
+//         }
+//     }
+// }
 
 #[async_trait]
 impl AsyncTransaction for MigrationConnection<'_> {
@@ -307,7 +303,8 @@ impl AsyncMigrate for MigrationConnection<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use surrealdb::engine::any::{self, Any};
+    use chrono::{DateTime, Utc};
+    use surrealdb::engine::any::{self};
 
     #[tokio::test]
     async fn test_migration_connection() {
