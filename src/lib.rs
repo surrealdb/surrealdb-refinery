@@ -137,12 +137,6 @@ impl From<surrealdb::Error> for SurrealError {
     }
 }
 
-// impl From<TypesError> for SurrealError {
-//     fn from(inner: TypesError) -> Self {
-//         SurrealError { inner }
-//     }
-// }
-
 impl From<SurrealError> for refinery_core::Error {
     fn from(val: SurrealError) -> Self {
         let result: Result<(), SurrealError> = Err(val);
@@ -164,19 +158,6 @@ impl From<HashMap<usize, TypesError>> for SurrealError {
         }
     }
 }
-
-// impl From<HashMap<usize, surrealdb::Error>> for SurrealError {
-//     fn from(inner: HashMap<usize, surrealdb::Error>) -> Self {
-//         let errors = inner
-//             .into_values()
-//             .map(|e| e.to_string())
-//             .collect::<Vec<_>>()
-//             .join(", ");
-//         SurrealError {
-//             inner: TypesError::thrown(errors),
-//         }
-//     }
-// }
 
 #[async_trait]
 impl AsyncTransaction for MigrationConnection<'_> {
