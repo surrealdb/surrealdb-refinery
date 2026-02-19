@@ -1,8 +1,6 @@
 use maplit::hashmap;
 use refinery::embed_migrations;
-use serde_json;
 use std::collections::HashMap;
-use surrealdb::types::Value;
 use surrealdb_refinery::MigrationConnection;
 
 #[tokio::test]
