@@ -3,9 +3,9 @@ name = "surrealdb_refinery"
 edition = "2024"
 [dependencies]
 
-surrealdb-types = { version = "3.0.0-alpha.13" }
-surrealdb-core = { version = "3.0.0-alpha.13" }
-surrealdb = { version = "3.0.0-alpha.13", features = [
+surrealdb-types = { version = "3.0.0" }
+surrealdb-core = { version = "3.0.0" }
+surrealdb = { version = "3.0.0", features = [
     "kv-mem",
     "kv-rocksdb",
     "kv-surrealkv",
