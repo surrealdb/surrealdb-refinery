@@ -148,11 +148,20 @@ impl From<SurrealError> for refinery_core::Error {
 
 impl From<HashMap<usize, TypesError>> for SurrealError {
     fn from(inner: HashMap<usize, TypesError>) -> Self {
-        let errors = inner
-            .into_values()
-            .map(|e| e.to_string())
+        // `take_errors()` keys each error by the statement's position in the
+        // submitted query. Preserve that index (sorted, since a HashMap has no
+        // order) so a failing multi-statement migration reports *which*
+        // statement broke — e.g. "statement 2: The field 'x' already exists" —
+        // not just the error text. Migrations are append-only, so when one
+        // fails the operator must locate the offending statement to write a
+        // corrective follow-up migration.
+        let mut entries: Vec<(usize, TypesError)> = inner.into_iter().collect();
+        entries.sort_by_key(|(index, _)| *index);
+        let errors = entries
+            .into_iter()
+            .map(|(index, error)| format!("statement {index}: {error}"))
             .collect::<Vec<_>>()
-            .join(", ");
+            .join("; ");
         SurrealError {
             inner: TypesError::thrown(errors),
         }
@@ -310,5 +319,24 @@ mod tests {
         }
         let examples: Vec<Example> = res.take(0).unwrap();
         assert_eq!(examples.len(), 1);
+    }
+
+    #[test]
+    fn error_map_preserves_statement_index() {
+        // A multi-statement query reports per-statement errors keyed by index;
+        // the conversion must keep the index (sorted) so a failed migration
+        // says which statement broke.
+        let mut errors: HashMap<usize, TypesError> = HashMap::new();
+        errors.insert(2, TypesError::thrown("boom two".to_string()));
+        errors.insert(0, TypesError::thrown("boom zero".to_string()));
+        let message = SurrealError::from(errors).to_string();
+
+        assert!(message.contains("statement 0: boom zero"), "got: {message}");
+        assert!(message.contains("statement 2: boom two"), "got: {message}");
+        // Sorted by index, so statement 0 is reported before statement 2.
+        assert!(
+            message.find("statement 0").unwrap() < message.find("statement 2").unwrap(),
+            "errors should be ordered by statement index: {message}"
+        );
     }
 }
