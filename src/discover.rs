@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use refinery_core::Migration;
 
 /// File extensions recognised as SurrealQL migrations.
-pub const MIGRATION_EXTENSIONS: [&str; 2] = ["surql", "sql"];
+const MIGRATION_EXTENSIONS: [&str; 2] = ["surql", "sql"];
 
 /// An error encountered while discovering migration files on disk.
 #[derive(Debug)]
@@ -113,10 +113,19 @@ mod tests {
 
     #[test]
     fn discovers_surql_migrations_in_version_order() {
-        let migrations = load_migrations("tests/migrations").unwrap();
-        assert_eq!(migrations.len(), 1);
-        assert_eq!(migrations[0].version(), 1);
-        assert_eq!(migrations[0].name(), "first");
+        let migrations = load_migrations("tests/fixtures/v1_v2_v3").unwrap();
+        let found: Vec<_> = migrations
+            .iter()
+            .map(|m| (m.version(), m.name().to_owned()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (1, "one".to_owned()),
+                (2, "two".to_owned()),
+                (3, "three".to_owned())
+            ]
+        );
     }
 
     #[test]

@@ -1,9 +1,8 @@
 //! The migration history table: its schema, its queries, and row decoding.
 
-use chrono::{DateTime, Utc};
 use refinery_core::{Migration, SchemaVersion};
 use surrealdb::types::SurrealValue;
-use surrealdb_types::{Error as TypesError, Value};
+use surrealdb_types::Datetime;
 use time::{Duration, OffsetDateTime};
 
 use crate::Error;
@@ -22,80 +21,49 @@ pub(crate) struct HistoryRow {
     /// refinery's `SchemaVersion` when converting, with a range check.
     version: i64,
     name: String,
-    applied_on: DateTime<Utc>,
-    checksum: Checksum,
-}
-
-/// A refinery migration checksum.
-///
-/// refinery checksums are `u64`, but SurrealDB integers are `i64`, so a
-/// checksum in the upper half of the range cannot be stored as a number. It is
-/// stored as a string instead, which round-trips the full range.
-#[derive(Debug)]
-struct Checksum(u64);
-
-impl SurrealValue for Checksum {
-    fn kind_of() -> surrealdb_types::Kind {
-        surrealdb_types::Kind::String
-    }
-
-    fn into_value(self) -> Value {
-        Value::String(self.0.to_string())
-    }
-
-    fn from_value(value: Value) -> Result<Self, TypesError> {
-        match value {
-            Value::String(text) => text
-                .parse::<u64>()
-                .map(Checksum)
-                .map_err(|error| TypesError::thrown(format!("invalid checksum {text:?}: {error}"))),
-            other => Err(TypesError::thrown(format!(
-                "expected checksum to be a string, found {other:?}"
-            ))),
-        }
-    }
+    applied_on: Datetime,
+    /// refinery checksums are `u64`, but SurrealDB integers are `i64`, so a
+    /// checksum in the upper half of the range cannot be stored as a number.
+    /// It is stored as a string, which round-trips the full range.
+    checksum: String,
 }
 
 impl TryFrom<HistoryRow> for Migration {
     type Error = Error;
 
     fn try_from(row: HistoryRow) -> Result<Self, Error> {
-        let version = SchemaVersion::try_from(row.version)
-            .map_err(|_| Error::VersionOutOfRange(row.version))?;
-        let applied_on = to_offset_datetime(&row.applied_on)
-            .ok_or_else(|| Error::TimestampOutOfRange(row.applied_on.timestamp()))?;
-        Ok(Migration::applied(
-            version,
-            row.name,
-            applied_on,
-            row.checksum.0,
-        ))
+        let version = SchemaVersion::try_from(row.version).map_err(|_| {
+            Error::InvalidHistoryRow(format!("version {} out of range", row.version))
+        })?;
+        let checksum = row.checksum.parse::<u64>().map_err(|error| {
+            Error::InvalidHistoryRow(format!("checksum {:?}: {error}", row.checksum))
+        })?;
+        let applied_on = to_offset_datetime(&row.applied_on).ok_or_else(|| {
+            Error::InvalidHistoryRow(format!("applied_on {} out of range", *row.applied_on))
+        })?;
+
+        Ok(Migration::applied(version, row.name, applied_on, checksum))
     }
 }
 
-/// Convert the `chrono` value SurrealDB hands back into the `time` value
-/// refinery expects, without going through a string.
-fn to_offset_datetime(value: &DateTime<Utc>) -> Option<OffsetDateTime> {
+/// Convert the value SurrealDB hands back into the `time` value refinery
+/// expects, without going through a string.
+fn to_offset_datetime(value: &Datetime) -> Option<OffsetDateTime> {
     let seconds = OffsetDateTime::from_unix_timestamp(value.timestamp()).ok()?;
     Some(seconds + Duration::nanoseconds(i64::from(value.timestamp_subsec_nanos())))
 }
 
-/// Reject a table name that SurrealDB would need quoted.
+/// Whether `name` is a bare SurrealDB identifier.
 ///
 /// refinery builds its history `INSERT` itself and interpolates the table name
 /// unquoted, so a name this driver would have to quote could never work. It is
 /// better to fail loudly than to create a table that cannot be written to.
-pub(crate) fn validate_table_name(name: &str) -> Result<(), Error> {
-    let valid = !name.is_empty()
+fn is_bare_identifier(name: &str) -> bool {
+    !name.is_empty()
         && !name.as_bytes()[0].is_ascii_digit()
         && name
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
-    if valid {
-        Ok(())
-    } else {
-        Err(Error::InvalidTableName(name.to_owned()))
-    }
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 /// DDL that brings the history table up to the shape this driver expects.
@@ -107,7 +75,7 @@ pub(crate) fn validate_table_name(name: &str) -> Result<(), Error> {
 /// There is no `BEGIN`/`COMMIT` here because [`crate::MigrationConnection`]
 /// runs every batch inside a transaction of its own.
 pub(crate) fn assert_table(table: &str) -> String {
-    if validate_table_name(table).is_err() {
+    if !is_bare_identifier(table) {
         return throw_invalid_table_name(table);
     }
     format!(
@@ -125,7 +93,7 @@ pub(crate) fn assert_table(table: &str) -> String {
 /// The ascending order is required, not cosmetic: refinery derives the current
 /// schema version from the last element of this list.
 pub(crate) fn applied_migrations(table: &str) -> String {
-    if validate_table_name(table).is_err() {
+    if !is_bare_identifier(table) {
         return throw_invalid_table_name(table);
     }
     format!("SELECT {COLUMNS} FROM {table} ORDER BY version ASC;")
@@ -133,7 +101,7 @@ pub(crate) fn applied_migrations(table: &str) -> String {
 
 /// The most recently applied migration.
 pub(crate) fn last_applied_migration(table: &str) -> String {
-    if validate_table_name(table).is_err() {
+    if !is_bare_identifier(table) {
         return throw_invalid_table_name(table);
     }
     format!("SELECT {COLUMNS} FROM {table} ORDER BY version DESC LIMIT 1;")
@@ -155,60 +123,39 @@ mod tests {
 
     #[test]
     fn accepts_the_refinery_default_table_name() {
-        assert!(validate_table_name("refinery_schema_history").is_ok());
+        assert!(is_bare_identifier("refinery_schema_history"));
     }
 
     #[test]
     fn rejects_names_that_would_need_quoting() {
         for name in ["", "with-hyphen", "with space", "1leading_digit", "sémi"] {
-            assert!(
-                validate_table_name(name).is_err(),
-                "{name:?} should be rejected"
-            );
+            assert!(!is_bare_identifier(name), "{name:?} should be rejected");
         }
     }
 
     #[test]
     fn rejects_a_surrealql_injection_payload() {
         let payload = "t; DEFINE TABLE evil SCHEMALESS; --";
-        assert!(validate_table_name(payload).is_err());
+        assert!(!is_bare_identifier(payload));
         for query in [
             assert_table(payload),
             applied_migrations(payload),
             last_applied_migration(payload),
         ] {
             // The payload does appear in the message, but only as the argument
-            // of a single THROW: the whole query must be one quoted string, so
-            // the payload is inert data rather than executable statements.
-            let inner = query
-                .strip_prefix("THROW \"")
-                .and_then(|rest| rest.strip_suffix("\";"))
-                .unwrap_or_else(|| panic!("not a lone THROW statement: {query}"));
-            assert!(
-                !closes_the_string_literal(inner),
-                "payload can escape the string literal: {query}"
+            // of a lone THROW, so it is inert data rather than statements.
+            assert_eq!(
+                query,
+                "THROW \"invalid migration table name: t; DEFINE TABLE evil SCHEMALESS; --\";"
             );
         }
     }
 
-    /// Whether `inner` contains an unescaped `"` that would end the literal
-    /// early and let the rest of the payload be parsed as SurrealQL.
-    fn closes_the_string_literal(inner: &str) -> bool {
-        let mut escaped = false;
-        for character in inner.chars() {
-            match character {
-                _ if escaped => escaped = false,
-                '\\' => escaped = true,
-                '"' => return true,
-                _ => {}
-            }
-        }
-        false
-    }
-
     #[test]
     fn escapes_quotes_in_the_thrown_message() {
-        let query = super::throw_invalid_table_name("a\"b\\c");
+        // Without escaping, the quote would close the string literal and the
+        // rest of the name would be parsed as SurrealQL.
+        let query = throw_invalid_table_name("a\"b\\c");
         assert_eq!(
             query,
             "THROW \"invalid migration table name: a\\\"b\\\\c\";"
@@ -227,21 +174,5 @@ mod tests {
         let query = last_applied_migration("hist");
         assert!(query.contains("ORDER BY version DESC"), "{query}");
         assert!(query.contains("LIMIT 1"), "{query}");
-    }
-
-    #[test]
-    fn converts_timestamps_without_losing_precision() {
-        let value = DateTime::from_timestamp(1_700_000_000, 123_456_789).unwrap();
-        let converted = to_offset_datetime(&value).unwrap();
-        assert_eq!(converted.unix_timestamp(), 1_700_000_000);
-        assert_eq!(converted.nanosecond(), 123_456_789);
-    }
-
-    #[test]
-    fn checksum_round_trips_the_full_u64_range() {
-        for original in [0, 1, i64::MAX as u64, u64::MAX] {
-            let value = Checksum(original).into_value();
-            assert_eq!(Checksum::from_value(value).unwrap().0, original);
-        }
     }
 }

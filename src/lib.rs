@@ -41,9 +41,9 @@
 //! from that migration persists.
 //!
 //! Because the driver opens that transaction itself, a migration must not open
-//! its own — SurrealDB rejects a nested `BEGIN`. For compatibility, a `BEGIN` /
-//! `COMMIT` pair wrapping the whole body is detected and removed, so migrations
-//! written in that style keep working unchanged.
+//! its own: SurrealDB rejects a nested `BEGIN` with "Cannot BEGIN a transaction
+//! within a transaction", the batch is cancelled, and nothing is applied. Remove
+//! any `BEGIN` / `COMMIT` from migration bodies.
 //!
 //! # History table
 //!
@@ -64,9 +64,8 @@
 mod discover;
 mod error;
 mod history;
-mod sql;
 
-pub use discover::{DiscoverError, MIGRATION_EXTENSIONS, load_migrations};
+pub use discover::{DiscoverError, load_migrations};
 pub use error::{Error, StatementError};
 
 /// Re-exported from refinery so callers need only depend on this crate.
@@ -97,18 +96,6 @@ use crate::history::HistoryRow;
 /// and would continue against the new target.
 pub struct MigrationConnection<'a, C: Connection = Any>(pub &'a Surreal<C>);
 
-impl<'a, C: Connection> MigrationConnection<'a, C> {
-    /// Wrap a SurrealDB client.
-    pub fn new(db: &'a Surreal<C>) -> Self {
-        Self(db)
-    }
-
-    /// The wrapped client.
-    pub fn db(&self) -> &'a Surreal<C> {
-        self.0
-    }
-}
-
 #[async_trait]
 impl<C: Connection> AsyncTransaction for MigrationConnection<'_, C> {
     type Error = Error;
@@ -122,10 +109,7 @@ impl<C: Connection> AsyncTransaction for MigrationConnection<'_, C> {
         &mut self,
         queries: T,
     ) -> Result<usize, Self::Error> {
-        let queries: Vec<&str> = queries
-            .map(sql::strip_outer_transaction)
-            .filter(|query| !query.trim().is_empty())
-            .collect();
+        let queries: Vec<&str> = queries.filter(|query| !query.trim().is_empty()).collect();
         if queries.is_empty() {
             return Ok(0);
         }

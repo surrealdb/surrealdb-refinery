@@ -1,12 +1,12 @@
 //! The error type returned by the driver.
 
+use std::collections::HashMap;
 use std::fmt;
 
 /// An error produced while running migrations against SurrealDB.
 ///
 /// Errors surface to callers wrapped in [`refinery_core::Error`], which adds the
-/// migration that was being applied. Match on this type via
-/// [`std::error::Error::source`] when you need to distinguish causes.
+/// migration that was being applied.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -17,18 +17,11 @@ pub enum Error {
     /// SurrealDB reports per-statement errors rather than failing the whole
     /// query, so this carries every failure, ordered by statement index.
     Statements(Vec<StatementError>),
-    /// A row in the migration history table could not be decoded.
+    /// A row of the migration history table could not be deserialized.
     Row(surrealdb::Error),
-    /// The configured migration table name is not a valid SurrealDB identifier.
-    ///
-    /// Only ASCII alphanumerics and underscores are accepted, and the name may
-    /// not begin with a digit. refinery interpolates the table name into its
-    /// history `INSERT` unquoted, so a name needing quoting cannot work.
-    InvalidTableName(String),
-    /// A history row recorded a version outside the range refinery supports.
-    VersionOutOfRange(i64),
-    /// A history row recorded a timestamp that cannot be represented.
-    TimestampOutOfRange(i64),
+    /// A row of the migration history table held a value this driver cannot
+    /// use: an unparseable checksum, or a version or timestamp out of range.
+    InvalidHistoryRow(String),
 }
 
 /// A single failed statement within a submitted query.
@@ -61,16 +54,8 @@ impl fmt::Display for Error {
                 Ok(())
             }
             Self::Row(_) => write!(f, "could not decode a migration history row"),
-            Self::InvalidTableName(name) => write!(
-                f,
-                "{name:?} is not a valid migration table name; use only ASCII \
-                 letters, digits and underscores, and do not start with a digit"
-            ),
-            Self::VersionOutOfRange(version) => {
-                write!(f, "migration version {version} is out of range")
-            }
-            Self::TimestampOutOfRange(seconds) => {
-                write!(f, "applied_on timestamp {seconds} is out of range")
+            Self::InvalidHistoryRow(reason) => {
+                write!(f, "invalid migration history row: {reason}")
             }
         }
     }
@@ -80,20 +65,15 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Client(source) | Self::Row(source) => Some(source),
-            Self::Statements(_)
-            | Self::InvalidTableName(_)
-            | Self::VersionOutOfRange(_)
-            | Self::TimestampOutOfRange(_) => None,
+            Self::Statements(_) | Self::InvalidHistoryRow(_) => None,
         }
     }
 }
 
 impl Error {
-    /// Build a [`Error::Statements`] from the per-statement errors SurrealDB
+    /// Build [`Error::Statements`] from the per-statement errors SurrealDB
     /// returns, ordered by statement index so the message is deterministic.
-    pub(crate) fn from_statement_errors(
-        errors: std::collections::HashMap<usize, surrealdb::Error>,
-    ) -> Self {
+    pub(crate) fn from_statement_errors(errors: HashMap<usize, surrealdb::Error>) -> Self {
         let mut errors: Vec<StatementError> = errors
             .into_iter()
             .map(|(index, error)| StatementError {

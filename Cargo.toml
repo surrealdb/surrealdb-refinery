@@ -28,7 +28,6 @@ surrealdb = { version = "3.0.0", default-features = false }
 surrealdb-types = "3.0.0"
 refinery-core = { version = "0.9", features = ["futures"] }
 async-trait = "0.1.89"
-chrono = "0.4.41"
 log = "0.4.14"
 time = "0.3.47"
 

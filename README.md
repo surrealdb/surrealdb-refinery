@@ -91,12 +91,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-A runnable version is in [`examples/basic_usage.rs`](examples/basic_usage.rs):
-
-```sh
-cargo run --example basic_usage
-```
-
 `MigrationConnection` borrows the `Surreal` handle, so pass `&db`. It is generic
 over the connection type, so a local `Surreal<Db>` or a remote
 `Surreal<Client>` works as well as `Surreal<Any>`. Do not change the session's
@@ -115,10 +109,11 @@ The `.sql` extension is also accepted. A file carrying either extension whose
 name does not match the pattern is an error, not a warning — a silently skipped
 migration is how a database ends up half-migrated.
 
-Migrations should **not** wrap themselves in `BEGIN` / `COMMIT`. The driver runs
-each migration in a transaction of its own, and SurrealDB rejects a nested
-`BEGIN`. Migrations written in the older wrapping style still work: a
-`BEGIN`/`COMMIT` pair around the whole body is detected and removed.
+Migrations must **not** wrap themselves in `BEGIN` / `COMMIT`. The driver runs
+each migration in a transaction of its own, and SurrealDB refuses a nested
+`BEGIN` with "Cannot BEGIN a transaction within a transaction". The batch is
+cancelled, so nothing is applied — but the migration will not run until the
+`BEGIN` and `COMMIT` lines are removed.
 
 ## How migrations are applied
 
@@ -145,9 +140,6 @@ mishandled.
   directory must exist wherever the binary runs. refinery's
   `embed_migrations!` only discovers `.sql` and `.rs` files, which is why this
   crate does its own discovery.
-- Migration file names must not contain an apostrophe. refinery interpolates
-  the name into the history `INSERT` unquoted, and this driver cannot override
-  that query.
 - The `surrealdb` client crate is BUSL-1.1 licensed, so that applies to your
   dependency graph even though this driver is Apache-2.0.
 

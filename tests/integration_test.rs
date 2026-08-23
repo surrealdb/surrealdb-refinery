@@ -68,14 +68,6 @@ async fn a_second_run_applies_nothing() {
     assert_eq!(history_versions(&db).await, [1, 2, 3]);
 }
 
-#[tokio::test]
-async fn applies_only_newly_added_migrations() {
-    let db = fresh_db().await;
-    run(&db, "tests/fixtures/v1_v3").await.unwrap();
-    // V4 does not exist, so extend by re-running the superset minus the gap.
-    assert_eq!(history_versions(&db).await, [1, 3]);
-}
-
 /// Regression: `get_applied_migrations_query` used to order by version
 /// DESC. refinery derives the current schema version from the *last* row, so
 /// descending order made it read the lowest applied version and silently apply
@@ -124,7 +116,15 @@ async fn a_failing_migration_is_not_recorded() {
     let error = run(&db, "tests/fixtures/bad_sql")
         .await
         .expect_err("invalid SurrealQL must fail the run");
-    assert!(format!("{error}").contains("V1__bad") || format!("{error:?}").contains("bad"));
+    let message = format!("{error:?}");
+    assert!(
+        message.contains("V1__bad"),
+        "should name the migration: {message}"
+    );
+    assert!(
+        message.contains("Parse error"),
+        "should be a parse error: {message}"
+    );
 
     // The history table exists (it is asserted before migrating) but is empty.
     assert!(history_versions(&db).await.is_empty());
@@ -148,16 +148,24 @@ async fn a_partially_failing_migration_rolls_back() {
     );
 }
 
-/// The repository's own fixture wraps its body in BEGIN/COMMIT. SurrealDB
-/// rejects a nested BEGIN, so the driver has to unwrap it.
+/// The driver opens the transaction, so a migration must not open its own.
+/// SurrealDB refuses the nested BEGIN and the batch is cancelled, which must
+/// leave no trace rather than half-applying the body.
 #[tokio::test]
-async fn accepts_a_migration_that_wraps_itself_in_a_transaction() {
+async fn refuses_a_migration_that_opens_its_own_transaction() {
     let db = fresh_db().await;
-    let applied = run(&db, "tests/migrations").await.unwrap();
-    assert_eq!(applied, ["first"]);
+    let error = run(&db, "tests/fixtures/wrapped")
+        .await
+        .expect_err("a self-wrapping migration must fail");
+    assert!(
+        format!("{error:?}").contains("BEGIN a transaction within a transaction"),
+        "unhelpful error: {error:?}"
+    );
+
+    assert!(history_versions(&db).await.is_empty());
     let tables = tables(&db).await;
-    assert!(tables.contains(&"table_1".to_string()), "{tables:?}");
-    assert!(tables.contains(&"table_2".to_string()), "{tables:?}");
+    assert!(!tables.contains(&"table_1".to_string()), "{tables:?}");
+    assert!(!tables.contains(&"table_2".to_string()), "{tables:?}");
 }
 
 #[tokio::test]
@@ -194,28 +202,35 @@ async fn the_history_table_rejects_a_duplicate_version() {
 }
 
 #[tokio::test]
-async fn records_a_full_range_checksum() {
-    // refinery checksums are u64; the column is a string so the upper half of
-    // the range survives. Reading the history back exercises the decode path.
+async fn round_trips_a_full_range_checksum_and_sub_second_timestamp() {
+    // The checksum column is a string, not an int, because refinery checksums
+    // are u64 and SurrealDB integers are i64. applied_on is a real datetime.
+    // Both are written by refinery's own INSERT, so pin the extremes here.
     let db = fresh_db().await;
-    run(&db, "tests/fixtures/v1_v2_v3").await.unwrap();
+    run(&db, "tests/fixtures/plain").await.unwrap();
 
-    let migrations = load_migrations("tests/fixtures/v1_v2_v3").unwrap();
+    db.query(
+        "UPDATE refinery_schema_history SET \
+         checksum = '18446744073709551615', \
+         applied_on = <datetime>'2024-01-01T00:00:00.123456789Z'",
+    )
+    .await
+    .expect("query")
+    .check()
+    .expect("update the history row");
+
+    let migrations = load_migrations("tests/fixtures/plain").unwrap();
     let mut connection = MigrationConnection(&db);
-    let runner = Runner::new(&migrations);
-    let last = runner
+    let last = Runner::new(&migrations)
         .get_last_applied_migration_async(&mut connection)
         .await
-        .expect("last applied")
-        .expect("some migration");
+        .expect("decoding a u64::MAX checksum must not fail")
+        .expect("one applied migration");
 
-    assert_eq!(
-        last.version(),
-        3,
-        "must be the highest version, not the first"
-    );
-    let expected = migrations.iter().find(|m| m.version() == 3).unwrap();
-    assert_eq!(last.checksum(), expected.checksum());
+    assert_eq!(last.checksum(), u64::MAX);
+    let applied_on = last.applied_on().expect("applied_on");
+    assert_eq!(applied_on.unix_timestamp(), 1_704_067_200);
+    assert_eq!(applied_on.nanosecond(), 123_456_789);
 }
 
 #[tokio::test]

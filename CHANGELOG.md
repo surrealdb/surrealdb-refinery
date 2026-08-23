@@ -44,8 +44,8 @@ fork of refinery, which `cargo publish` refuses.
 - `MigrationConnection` is generic over `surrealdb::Connection`, defaulting to
   `Any`, so local and remote handles both work.
 - `applied_on` is stored as a SurrealDB `datetime` rather than a string.
-- Migrations no longer need their own `BEGIN`/`COMMIT`; the driver provides the
-  transaction. Bodies that wrap themselves are unwrapped for compatibility.
+- Migrations must no longer carry their own `BEGIN`/`COMMIT`; the driver
+  provides the transaction, and SurrealDB refuses a nested `BEGIN`.
 
 ### Upgrading
 
@@ -53,3 +53,6 @@ The history table schema changed, and its DDL is `IF NOT EXISTS`, so it is not
 altered on an existing deployment. A database migrated by a pre-release build
 has `applied_on` as a string and will fail to decode. Drop
 `refinery_schema_history` and re-run, or migrate the column by hand.
+
+Re-running re-executes every migration, so remove any `BEGIN` and `COMMIT` lines
+from your `.surql` files first: the driver now supplies the transaction.
