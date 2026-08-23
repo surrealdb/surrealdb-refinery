@@ -9,7 +9,7 @@ repository = "https://github.com/surrealdb/surrealdb-refinery"
 readme = "README.md"
 keywords = ["surrealdb", "refinery", "migrations", "surrealql"]
 categories = ["database"]
-exclude = [".direnv", ".envrc", ".github", "flake.nix", "flake.lock", "deny.toml", "rustfmt.toml"]
+exclude = [".github", "deny.toml"]
 
 [features]
 default = ["protocol-ws", "protocol-http"]
