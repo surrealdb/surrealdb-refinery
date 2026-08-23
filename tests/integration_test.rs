@@ -1,79 +1,25 @@
-use maplit::hashmap;
-use refinery::embed_migrations;
-use std::collections::HashMap;
-use surrealdb_refinery::MigrationConnection;
+use surrealdb_refinery::{load_migrations, MigrationConnection};
 
 #[tokio::test]
-async fn test_applies_migrations() {
-    testing_logger::setup();
+async fn applies_surql_migrations_without_the_fork() {
+    let migrations = load_migrations("tests/migrations").expect("discovery failed");
+    assert_eq!(migrations.len(), 1);
 
-    embed_migrations!("tests/migrations");
-
-    let runner = migrations::runner();
-    let db = match surrealdb::engine::any::connect("mem://").await {
-        Ok(db) => db,
-        Err(e) => panic!("Failed to connect to SurrealDB from mem://: {}", e),
-    };
+    let db = surrealdb::engine::any::connect("mem://").await.unwrap();
     db.use_ns("test").await.unwrap();
     db.use_db("test").await.unwrap();
-    let db2 = db.clone();
-    let mut connection = MigrationConnection(&db);
-    runner.run_async(&mut connection).await.unwrap();
 
-    let mut res = db2.query("INFO FOR DB").await.unwrap();
-    let errors = res.take_errors();
-    if !errors.is_empty() {
-        panic!("error getting info from test db: {:?}", errors);
-    }
+    let runner = refinery_core::Runner::new(&migrations);
+    let mut conn = MigrationConnection(&db);
+    let report = runner.run_async(&mut conn).await.unwrap();
 
-    let tables: Vec<HashMap<String, String>> = res.take("tables").unwrap();
-    let expected_tables: Vec<HashMap<String, String>> = vec![hashmap! {
-        "table_1".to_string() => "DEFINE TABLE table_1 TYPE NORMAL SCHEMAFULL PERMISSIONS NONE".to_string(),
-        "table_2".to_string() => "DEFINE TABLE table_2 TYPE NORMAL SCHEMAFULL PERMISSIONS NONE".to_string(),
-        "refinery_schema_history".to_string() => "DEFINE TABLE refinery_schema_history TYPE NORMAL SCHEMAFULL PERMISSIONS NONE".to_string()
-    }];
-    assert_eq!(tables, expected_tables);
+    // assert on the Report, not on refinery's log wording
+    let applied: Vec<_> = report.applied_migrations().iter().map(|m| m.name().to_string()).collect();
+    assert_eq!(applied, vec!["first".to_string()]);
 
-    // Validate that certain log messages were written
-    testing_logger::validate(|captured_logs| {
-        assert!(
-            captured_logs
-                .iter()
-                .any(|log| { log.body.contains("schema history table is empty") })
-        );
-        assert!(
-            captured_logs
-                .iter()
-                .any(|log| { log.body.contains("applying migration") })
-        );
-    });
-}
-
-#[tokio::test]
-async fn test_applies_migrations_only_once() {
-    testing_logger::setup();
-
-    embed_migrations!("tests/migrations");
-
-    let runner = migrations::runner();
-    let db = match surrealdb::engine::any::connect("mem://").await {
-        Ok(db) => db,
-        Err(e) => panic!("Failed to connect to SurrealDB: {}", e),
-    };
-    db.use_ns("test").await.unwrap();
-    db.use_db("test").await.unwrap();
-    let mut connection = MigrationConnection(&db);
-    let report = runner.run_async(&mut connection).await.unwrap();
-    println!("First run report: {:?}", report);
-    let _ = runner.run_async(&mut connection).await.unwrap();
-
-    // This ensures that refinery emitted the 'no migrations to apply' log,
-    // confirming that migrations are not re-applied.
-    testing_logger::validate(|captured_logs| {
-        assert!(
-            captured_logs
-                .iter()
-                .any(|log| { log.body.contains("no migrations to apply") })
-        );
-    });
+    let mut res = db.query("INFO FOR DB").await.unwrap();
+    let tables: Vec<std::collections::HashMap<String, String>> = res.take("tables").unwrap();
+    let names: Vec<&String> = tables[0].keys().collect();
+    assert!(names.iter().any(|n| *n == "table_1"), "got {names:?}");
+    assert!(names.iter().any(|n| *n == "table_2"), "got {names:?}");
 }

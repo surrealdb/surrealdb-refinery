@@ -1,3 +1,6 @@
+pub mod discover;
+pub use discover::{load_migrations, DiscoverError};
+
 use async_trait::async_trait;
 use log::debug;
 use refinery_core::Migration;

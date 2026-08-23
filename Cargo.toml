@@ -1,6 +1,15 @@
 [package]
-name = "surrealdb_refinery"
+name = "surrealdb-refinery"
+version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+description = "A refinery migration driver for SurrealDB, enabling schema migrations written in SurrealQL."
+repository = "https://github.com/surrealdb/surrealdb-refinery"
+readme = "README.md"
+keywords = ["surrealdb", "refinery", "migrations", "surrealql"]
+categories = ["database"]
+exclude = [".direnv", "flake.nix", "flake.lock", "shell.nix", ".envrc", "/integration_test.rs"]
 [dependencies]
 
 surrealdb-types = { version = "3.0.0" }
@@ -16,10 +25,7 @@ serde_json = "1.0.143"
 serde = { version = "1.0.219", features = ["derive"] }
 log = "0.4.14"
 tokio = { version = "1.47.1", features = ["macros", "time", "rt-multi-thread"] }
-refinery = { git = "https://github.com/manelmontilla/refinery", branch = "surql-files" }
-refinery-core = { git = "https://github.com/manelmontilla/refinery", branch = "surql-files", features = [
-    "futures",
-] }
+refinery-core = { version = "0.9", features = ["futures"] }
 
 anyhow = "1.0.99"
 time = { version = "0.3.41", features = ["formatting", "parsing"] }

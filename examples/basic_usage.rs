@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db.use_ns("ns").await.unwrap();
     db.use_db("app").await.unwrap();
     let mut connection = MigrationConnection(&db);
-    let runner = refinery::Runner::new(&migrations);
+    let runner = refinery_core::Runner::new(&migrations);
 
     // Run migrations
     println!("Running migrations...");
