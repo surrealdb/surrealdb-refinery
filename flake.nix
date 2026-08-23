@@ -1,19 +1,16 @@
 {
-  description = "SurrealMMP API";
+  description = "SurrealDB driver for refinery";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05-small";
-    # Fixed version for k3d 5.8.2
-    pkgs-02032da.url = "github:NixOS/nixpkgs/02032da4af073d0f6110540c8677f16d4be0117f";
     flake-utils.url = "github:numtide/flake-utils/v1.0.0";
     fenix.url = "github:nix-community/fenix";
   };
 
-  outputs = { self, nixpkgs, pkgs-02032da, flake-utils, fenix }:
+  outputs = { self, nixpkgs, flake-utils, fenix }:
     flake-utils.lib.eachDefaultSystem (system:
     let
       pkgs = nixpkgs.legacyPackages.${system};
-      pkgs-02032 = pkgs-02032da.legacyPackages.${system};
       rust-toolchain = fenix.packages.${system}.stable.withComponents [
         "cargo"
         "rust-std"
@@ -27,16 +24,7 @@
       {
         devShells.default = mkShell {
           packages = [
-            awscli2
-            kubectl
-            kustomize
-            pkgs-02032.k3d
-            kubectx
-            kubernetes-helm
-            envsubst
-            curl
             rust-toolchain
-            granted
           ] ++ (if stdenv.isDarwin then [
             # macOS specific dependencies
             libiconv

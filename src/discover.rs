@@ -3,7 +3,7 @@
 //! This is the in-crate replacement for refinery's `.sql`-only file discovery,
 //! which is why this driver does not need a patched refinery. The version, name
 //! and checksum of each migration are still parsed by refinery itself, so the
-//! naming rules are exactly those of [`refinery::embed_migrations!`].
+//! naming rules are exactly those of refinery's `embed_migrations!`.
 
 use std::path::{Path, PathBuf};
 
@@ -58,7 +58,7 @@ impl std::error::Error for DiscoverError {
 /// Load every SurrealQL migration under `dir`, recursing into subdirectories.
 ///
 /// The returned migrations are ordered by version, ready for
-/// [`refinery::Runner::new`].
+/// [`crate::Runner::new`].
 ///
 /// Unlike refinery's own loader, a file that carries a migration extension but
 /// whose stem does not parse is an **error**, not a warning: a silently skipped

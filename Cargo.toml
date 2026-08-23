@@ -9,7 +9,7 @@ repository = "https://github.com/surrealdb/surrealdb-refinery"
 readme = "README.md"
 keywords = ["surrealdb", "refinery", "migrations", "surrealql"]
 categories = ["database"]
-exclude = [".direnv", "flake.nix", "flake.lock", "shell.nix", ".envrc"]
+exclude = [".direnv", ".envrc", ".github", "flake.nix", "flake.lock", "deny.toml", "rustfmt.toml"]
 
 [features]
 default = ["protocol-ws", "protocol-http"]
@@ -30,7 +30,7 @@ refinery-core = { version = "0.9", features = ["futures"] }
 async-trait = "0.1.89"
 chrono = "0.4.41"
 log = "0.4.14"
-time = "0.3.41"
+time = "0.3.47"
 
 [dev-dependencies]
 # `kv-mem` is enabled here so the test suite can use `mem://` without forcing

@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Format and clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      # --all-features builds the embedded engines, which is where a
+      # feature-gated compile error would otherwise hide.
+      - run: cargo clippy --all-targets --all-features
+
+  test:
+    name: Test (${{ matrix.os }}, ${{ matrix.rust }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable]
+        include:
+          # The MSRV declared in Cargo.toml, checked so it cannot silently rot.
+          - os: ubuntu-latest
+            rust: "1.89"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-targets
+      - run: cargo test --doc
+
+  features:
+    name: Feature matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The library must compile with no engine and no protocol enabled.
+      - run: cargo build --lib --no-default-features
+      - run: cargo build --lib --no-default-features --features protocol-ws
+      - run: cargo build --lib --no-default-features --features kv-mem
+      - run: cargo build --lib --all-features
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Catches a missing manifest field, an unpublishable dependency, and
+      # anything that would ship in (or fall out of) the .crate tarball.
+      - run: cargo package
+      - name: Show packaged files
+        run: cargo package --list
+
+  # Blocking: everything here is under this repository's control. The sources
+  # check is what stops a git dependency reappearing, which would make the
+  # crate unpublishable again.
+  deny:
+    name: Bans, licenses and sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check bans licenses sources
+
+  # Non-blocking: the advisories in this graph are in surrealdb-core's
+  # transitive dependencies and cannot be fixed from here. Reported so they
+  # stay visible, but they do not gate a merge.
+  advisories:
+    name: Advisories (report only)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
