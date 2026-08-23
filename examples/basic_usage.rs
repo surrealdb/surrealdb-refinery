@@ -3,7 +3,7 @@
 //!
 //! Run with: `cargo run --example basic_usage`
 
-use surrealdb_refinery::{MigrationConnection, load_migrations};
+use surrealdb_refinery::{MigrationConnection, Runner, load_migrations};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,9 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db.use_db("example").await?;
 
     let mut connection = MigrationConnection(&db);
-    let report = refinery_core::Runner::new(&migrations)
-        .run_async(&mut connection)
-        .await?;
+    let report = Runner::new(&migrations).run_async(&mut connection).await?;
 
     for migration in report.applied_migrations() {
         println!("applied V{} {}", migration.version(), migration.name());

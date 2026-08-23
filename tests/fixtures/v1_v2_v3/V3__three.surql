@@ -1,0 +1,1 @@
+DEFINE TABLE thing_three SCHEMAFULL;

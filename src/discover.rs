@@ -74,7 +74,10 @@ pub fn load_migrations(dir: impl AsRef<Path>) -> Result<Vec<Migration>, Discover
             path: path.clone(),
             source,
         })?;
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
         let migration = Migration::unapplied(stem, &sql)
             .map_err(|source| DiscoverError::InvalidName { path, source })?;
         migrations.push(migration);
