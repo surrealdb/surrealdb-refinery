@@ -89,27 +89,18 @@ jobs:
       - name: Show packaged files
         run: cargo package --list
 
-  # Blocking: everything here is under this repository's control. The sources
-  # check is what stops a git dependency reappearing, which would make the
-  # crate unpublishable again.
   deny:
-    name: Bans, licenses and sources
+    name: Dependency policy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
-          command: check bans licenses sources
-
-  # Non-blocking: the advisories in this graph are in surrealdb-core's
-  # transitive dependencies and cannot be fixed from here. Reported so they
-  # stay visible, but they do not gate a merge.
-  advisories:
-    name: Advisories (report only)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
-        with:
-          command: check advisories
+          command: check advisories bans licenses sources
+          # Vulnerabilities here are all in surrealdb-core's transitive
+          # dependencies and cannot be fixed from this repository, so they are
+          # logged rather than gating a merge. `yanked` stays denied: that one
+          # is actionable with `cargo update`, and it has already caught two.
+          # The `sources` check is what stops a git dependency reappearing and
+          # making the crate unpublishable again.
+          command-arguments: -W vulnerability -W unmaintained -W unsound -W notice
