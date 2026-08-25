@@ -1,44 +1,38 @@
 [package]
-name = "surrealdb_refinery"
+name = "surrealdb-refinery"
+version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+description = "A refinery migration driver for SurrealDB, enabling schema migrations written in SurrealQL."
+repository = "https://github.com/surrealdb/surrealdb-refinery"
+readme = "README.md"
+keywords = ["surrealdb", "refinery", "migrations", "surrealql"]
+categories = ["database"]
+exclude = [".github", "deny.toml"]
+
+[features]
+default = ["protocol-ws", "protocol-http"]
+# Connect to a remote SurrealDB over WebSockets or HTTP.
+protocol-ws = ["surrealdb/protocol-ws"]
+protocol-http = ["surrealdb/protocol-http"]
+# Embedded storage engines. None are enabled by default: a migration driver
+# needs the client API, and enabling `kv-rocksdb` in particular forces a C++
+# RocksDB build on every consumer.
+kv-mem = ["surrealdb/kv-mem"]
+kv-rocksdb = ["surrealdb/kv-rocksdb"]
+kv-surrealkv = ["surrealdb/kv-surrealkv"]
+
 [dependencies]
-
-surrealdb-types = { version = "3.0.0" }
-surrealdb-core = { version = "3.0.0" }
-surrealdb = { version = "3.0.0", features = [
-    "kv-mem",
-    "kv-rocksdb",
-    "kv-surrealkv",
-    "protocol-ws",
-    "protocol-http",
-] }
-serde_json = "1.0.143"
-serde = { version = "1.0.219", features = ["derive"] }
-log = "0.4.14"
-tokio = { version = "1.47.1", features = ["macros", "time", "rt-multi-thread"] }
-refinery = { git = "https://github.com/manelmontilla/refinery", branch = "surql-files" }
-refinery-core = { git = "https://github.com/manelmontilla/refinery", branch = "surql-files", features = [
-    "futures",
-] }
-
-anyhow = "1.0.99"
-time = { version = "0.3.41", features = ["formatting", "parsing"] }
-chrono = { version = "0.4.41", features = ["serde"] }
+surrealdb = { version = "3.0.0", default-features = false }
+surrealdb-types = "3.0.0"
+refinery-core = { version = "0.9", features = ["futures"] }
 async-trait = "0.1.89"
-
+log = "0.4.14"
+time = "0.3.47"
 
 [dev-dependencies]
-env_logger = "0.11.8"
-maplit = "1.0.2"
-serde_json = "1.0.143"
-testing_logger = "0.1.1"
-
-# [features]
-# surrealdb = [
-#     "surrealdb/kv-mem",
-#     "surrealdb/kv-rocksdb",
-#     "surrealdb/kv-surrealkv",
-#     "surrealdb/protocol-http",
-#     "surrealdb/protocol-ws",
-#     "surrealdb/rustls",
-# ]
+# `kv-mem` is enabled here so the test suite can use `mem://` without forcing
+# an embedded engine on library consumers.
+surrealdb = { version = "3.0.0", features = ["kv-mem"] }
+tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }

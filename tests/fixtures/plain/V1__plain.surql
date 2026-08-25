@@ -1,0 +1,1 @@
+DEFINE TABLE plain_table SCHEMAFULL;

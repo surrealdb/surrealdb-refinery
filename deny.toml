@@ -1,0 +1,66 @@
+[graph]
+# The default feature set, which is what a consumer gets unless they opt into
+# an embedded engine. Enabling every feature drags in RocksDB, SurrealKV and
+# async-graphql, whose advisories this crate cannot act on.
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Note that the graph is not all-permissive: the `surrealdb` client crate and
+# its `surrealdb-core` / `surrealdb-types` dependencies are BUSL-1.1, because
+# the client embeds the database. Consumers of this driver link against that,
+# even when they only ever talk to a remote instance.
+allow = [
+    "BUSL-1.1",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    # Used by the certificate-root data crates.
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "OpenSSL",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+# These crates declare `license-file` rather than an SPDX `license` field, so
+# the expression has to be stated here or cargo-deny reports them unlicensed.
+[[licenses.clarify]]
+crate = "surrealdb"
+expression = "BUSL-1.1"
+license-files = [{ path = "LICENSE", hash = 0xbb1191d7 }]
+
+[[licenses.clarify]]
+crate = "surrealdb-core"
+expression = "BUSL-1.1"
+license-files = [{ path = "LICENSE", hash = 0xbb1191d7 }]
+
+[[licenses.clarify]]
+crate = "surrealdb-types"
+expression = "BUSL-1.1"
+license-files = [{ path = "LICENSE", hash = 0xbb1191d7 }]
+
+[[licenses.clarify]]
+crate = "surrealdb-types-derive"
+expression = "BUSL-1.1"
+license-files = [{ path = "LICENSE", hash = 0xbb1191d7 }]
+
+[bans]
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# No git dependencies: a crate with one cannot be published to crates.io.
+allow-git = []

@@ -1,314 +1,179 @@
+#![deny(missing_docs)]
+
+//! A [refinery] migration driver for [SurrealDB], so schema migrations can be
+//! written in SurrealQL.
+//!
+//! [refinery]: https://github.com/rust-db/refinery
+//! [SurrealDB]: https://surrealdb.com/
+//!
+//! # Quick start
+//!
+//! ```no_run
+//! use surrealdb_refinery::{MigrationConnection, Runner, load_migrations};
+//!
+//! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+//! let migrations = load_migrations("migrations")?;
+//!
+//! let db = surrealdb::engine::any::connect("mem://").await?;
+//! // A namespace and database must be selected before migrating.
+//! db.use_ns("myapp").await?;
+//! db.use_db("myapp").await?;
+//!
+//! let mut connection = MigrationConnection(&db);
+//! let report = Runner::new(&migrations).run_async(&mut connection).await?;
+//! println!("applied {} migration(s)", report.applied_migrations().len());
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Migration files
+//!
+//! Files are named `V{version}__{description}.surql`, matching refinery's
+//! convention; `.sql` is also accepted. [`load_migrations`] discovers them at
+//! runtime. refinery's own `embed_migrations!` cannot be used, because it only
+//! recognises `.sql` and `.rs`.
+//!
+//! # How migrations are applied
+//!
+//! Each migration body and the history row recording it are executed in a
+//! single SurrealDB transaction, so a migration cannot be applied without being
+//! recorded. If any statement fails, the transaction is cancelled and nothing
+//! from that migration persists.
+//!
+//! Because the driver opens that transaction itself, a migration must not open
+//! its own: SurrealDB rejects a nested `BEGIN` with "Cannot BEGIN a transaction
+//! within a transaction", the batch is cancelled, and nothing is applied. Remove
+//! any `BEGIN` / `COMMIT` from migration bodies.
+//!
+//! # History table
+//!
+//! Applied migrations are recorded in `refinery_schema_history`, which can be
+//! renamed with `Runner::set_migration_table_name`. The name must be a bare
+//! SurrealDB identifier: ASCII letters, digits and underscores, not starting
+//! with a digit. refinery interpolates it into its own `INSERT` unquoted, so
+//! anything needing quotes is rejected rather than silently mishandled.
+//!
+//! A `UNIQUE` index on `version` makes double-application an error rather than
+//! a duplicate row, which is what protects concurrent runners from each other.
+//!
+//! # Async only
+//!
+//! Only refinery's `AsyncMigrate` is implemented; there is no blocking
+//! `Migrate` implementation.
+
+mod discover;
+mod error;
+mod history;
+
+pub use discover::{DiscoverError, load_migrations};
+pub use error::{Error, StatementError};
+
+/// Re-exported from refinery so callers need only depend on this crate.
+pub use refinery_core::{Migration, Report, Runner, SchemaVersion, Target};
+
 use async_trait::async_trait;
-use log::debug;
-use refinery_core::Migration;
-use refinery_core::error::WrapMigrationError;
 use refinery_core::traits::r#async::{AsyncMigrate, AsyncQuery, AsyncTransaction};
-
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::fmt::Display;
-use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
-use surrealdb::types::SurrealValue;
-use surrealdb_types::Error as TypesError;
-use surrealdb_types::Number;
-use surrealdb_types::Value;
-use time::OffsetDateTime;
+use surrealdb::{Connection, Surreal};
 
-#[derive(Debug)]
-pub enum State {
-    Applied,
-    Unapplied,
-}
+use crate::history::HistoryRow;
 
-impl SurrealValue for State {
-    fn kind_of() -> surrealdb_types::Kind {
-        surrealdb_types::Kind::Int
-    }
-
-    fn into_value(self) -> surrealdb_types::Value {
-        match self {
-            Self::Applied => Value::Number(Number::Int(1)),
-            Self::Unapplied => Value::Number(Number::Int(1)),
-        }
-    }
-
-    fn from_value(value: surrealdb_types::Value) -> Result<Self, TypesError>
-    where
-        Self: Sized,
-    {
-        match value {
-            Value::Number(Number::Int(1)) => Ok(State::Applied),
-            Value::Number(Number::Int(0)) => Ok(State::Unapplied),
-            _ => Err(TypesError::thrown(
-                "invalid valued for State enum: expected 0 or 1".to_string(),
-            )),
-        }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug, SurrealValue)]
-struct MigrationInner {
-    state: State,
-    name: String,
-    version: i32,
-    checksum: ChecksumType,
-    sql: Option<String>,
-    applied_on: Option<String>,
-}
-
-#[derive(Debug, Eq, PartialEq, Hash)]
-struct ChecksumType(u64);
-
-impl SurrealValue for ChecksumType {
-    fn kind_of() -> surrealdb_types::Kind {
-        surrealdb_types::Kind::String
-    }
-
-    fn into_value(self) -> surrealdb_types::Value {
-        Value::String(self.0.to_string())
-    }
-
-    fn from_value(value: surrealdb_types::Value) -> Result<Self, TypesError>
-    where
-        Self: Sized,
-    {
-        match value {
-            Value::String(s) => s
-                .parse::<u64>()
-                .map(ChecksumType)
-                .map_err(|e| TypesError::thrown(format!("failed to parse checksum string: {}", e))),
-            _ => Err(TypesError::thrown(format!(
-                "invalid value for ChecksumType: expected String"
-            ))),
-        }
-    }
-}
-
-impl From<MigrationInner> for Migration {
-    fn from(inner: MigrationInner) -> Self {
-        match inner.applied_on {
-            Some(applied_on) => {
-                let native_applied_on = OffsetDateTime::parse(
-                    &applied_on,
-                    &time::format_description::well_known::Rfc3339,
-                )
-                .expect(format!("failed to parse applied_on timestamp: {}", &applied_on).as_str());
-                Migration::applied(
-                    inner.version,
-                    inner.name,
-                    native_applied_on,
-                    inner.checksum.0,
-                )
-            }
-            None => Migration::unapplied(&inner.name, &inner.sql.unwrap()).unwrap(),
-        }
-    }
-}
-
-pub struct MigrationConnection<'a>(pub &'a Surreal<Any>);
-
-pub struct SurrealError {
-    inner: TypesError,
-}
-
-impl Display for SurrealError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SurrealDB error: {}", self.inner)
-    }
-}
-
-impl Debug for SurrealError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SurrealDB error: {}", self.inner)
-    }
-}
-
-impl std::error::Error for SurrealError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.inner.source()
-    }
-}
-
-impl From<surrealdb::Error> for SurrealError {
-    fn from(inner: surrealdb::Error) -> Self {
-        SurrealError { inner }
-    }
-}
-
-impl From<SurrealError> for refinery_core::Error {
-    fn from(val: SurrealError) -> Self {
-        let result: Result<(), SurrealError> = Err(val);
-        result
-            .migration_err("error getting last applied migration", None)
-            .unwrap_err()
-    }
-}
-
-impl From<HashMap<usize, TypesError>> for SurrealError {
-    fn from(inner: HashMap<usize, TypesError>) -> Self {
-        let errors = inner
-            .into_values()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        SurrealError {
-            inner: TypesError::thrown(errors),
-        }
-    }
-}
+/// A refinery connection backed by a SurrealDB client.
+///
+/// This borrows the client rather than owning it, so the same handle can be
+/// used for migrations and for application queries:
+///
+/// ```no_run
+/// # use surrealdb_refinery::MigrationConnection;
+/// # async fn run(db: &surrealdb::Surreal<surrealdb::engine::any::Any>) {
+/// let mut connection = MigrationConnection(db);
+/// # let _ = &mut connection;
+/// # }
+/// ```
+///
+/// The namespace and database must already be selected. Do not change either
+/// while a migration run is in progress: the run holds no session of its own
+/// and would continue against the new target.
+pub struct MigrationConnection<'a, C: Connection = Any>(pub &'a Surreal<C>);
 
 #[async_trait]
-impl AsyncTransaction for MigrationConnection<'_> {
-    type Error = SurrealError;
+impl<C: Connection> AsyncTransaction for MigrationConnection<'_, C> {
+    type Error = Error;
 
+    /// Run every statement in one SurrealDB transaction.
+    ///
+    /// refinery passes the migration body and the history `INSERT` that records
+    /// it together, and expects them to be atomic. On any failure the whole
+    /// transaction is cancelled, which for SurrealDB rolls back DDL too.
     async fn execute<'a, T: Iterator<Item = &'a str> + Send>(
         &mut self,
         queries: T,
     ) -> Result<usize, Self::Error> {
-        let mut count = 0;
-        for query in queries {
-            if query.is_empty() {
-                continue;
-            }
-            let mut response = self.0.query(query).await?;
-            let errors = response.take_errors();
-            if !errors.is_empty() {
-                let err: SurrealError = errors.into();
-                return Err(err);
-            }
-            count += 1;
+        let queries: Vec<&str> = queries.filter(|query| !query.trim().is_empty()).collect();
+        if queries.is_empty() {
+            return Ok(0);
         }
-        Ok(count)
+
+        let transaction = self.0.clone().begin().await.map_err(Error::Client)?;
+
+        for (index, query) in queries.iter().enumerate() {
+            log::debug!(target: "surrealdb_refinery", "statement {index}: {query}");
+
+            let failure = match transaction.query(*query).await {
+                Err(error) => Some(Error::Client(error)),
+                Ok(mut response) => {
+                    let errors = response.take_errors();
+                    (!errors.is_empty()).then(|| Error::from_statement_errors(errors))
+                }
+            };
+
+            if let Some(error) = failure {
+                log::error!(target: "surrealdb_refinery", "statement {index} failed, rolling back: {error}");
+                if let Err(error) = transaction.cancel().await {
+                    log::error!(target: "surrealdb_refinery", "rollback failed: {error}");
+                }
+                return Err(error);
+            }
+        }
+
+        transaction.commit().await.map_err(Error::Client)?;
+        Ok(queries.len())
     }
 }
 
 #[async_trait]
-impl AsyncQuery<Vec<Migration>> for MigrationConnection<'_> {
+impl<C: Connection> AsyncQuery<Vec<Migration>> for MigrationConnection<'_, C> {
     async fn query(
         &mut self,
         query: &str,
     ) -> Result<Vec<Migration>, <Self as AsyncTransaction>::Error> {
-        let res = self.0.query(query).await?;
-        let mut res = res.check()?;
-        let m: Vec<MigrationInner> = res.take(0)?;
-        Ok(m.into_iter().map(Migration::from).collect())
+        log::debug!(target: "surrealdb_refinery", "query: {query}");
+
+        let mut response = self.0.query(query).await.map_err(Error::Client)?;
+        let errors = response.take_errors();
+        if !errors.is_empty() {
+            return Err(Error::from_statement_errors(errors));
+        }
+
+        let rows: Vec<HistoryRow> = response.take(0).map_err(Error::Row)?;
+        rows.into_iter().map(Migration::try_from).collect()
     }
 }
 
+/// Only the query builders are overridden. The trait's default
+/// `get_applied_migrations` and `get_last_applied_migration` then do the right
+/// thing, including wrapping errors with the operation that failed.
 #[async_trait]
-impl AsyncMigrate for MigrationConnection<'_> {
+impl<C: Connection> AsyncMigrate for MigrationConnection<'_, C> {
     fn assert_migrations_table_query(migration_table_name: &str) -> String {
-        format!(
-            "
-            BEGIN;
-            DEFINE TABLE IF NOT EXISTS {migration_table_name} SCHEMAFULL;
-            DEFINE FIELD IF NOT EXISTS state ON {migration_table_name} TYPE int DEFAULT 0;
-            DEFINE FIELD IF NOT EXISTS name ON {migration_table_name} TYPE string;
-            DEFINE FIELD IF NOT EXISTS checksum ON {migration_table_name} TYPE string;
-            DEFINE FIELD IF NOT EXISTS version ON {migration_table_name} TYPE int;
-            DEFINE FIELD IF NOT EXISTS sql ON {migration_table_name} TYPE option<string>;
-            DEFINE FIELD IF NOT EXISTS applied_on ON {migration_table_name} TYPE option<string>;
-            COMMIT;"
-        )
-    }
-
-    fn get_last_applied_migration_query(migration_table_name: &str) -> String {
-        format!("SELECT * FROM {migration_table_name} ORDER BY  DESC LIMIT 1;")
+        history::assert_table(migration_table_name)
     }
 
     fn get_applied_migrations_query(migration_table_name: &str) -> String {
-        format!("SELECT * FROM {migration_table_name} ORDER BY version DESC;")
+        history::applied_migrations(migration_table_name)
     }
 
-    async fn get_applied_migrations(
-        &mut self,
-        migration_table_name: &str,
-    ) -> Result<Vec<Migration>, refinery_core::Error> {
-        let query = Self::get_applied_migrations_query(migration_table_name);
-        debug!("running applied migrations query {}", query);
-        let mut response = self
-            .0
-            .query(query)
-            .await
-            .migration_err("error getting applied migrations", None)?;
-        let errors = response.take_errors();
-        if !errors.is_empty() {
-            let err: SurrealError = errors.into();
-            return Err(refinery_core::Error::from(err));
-        }
-        debug!("response from applied migrations query {:?}", response);
-        let migrations: Vec<MigrationInner> = response.take(0).map_err(|err| {
-            let err: SurrealError = err.into();
-            refinery_core::Error::from(err)
-        })?;
-
-        let migrations = migrations.into_iter().map(|m| m.into()).collect::<Vec<_>>();
-        Ok(migrations)
-    }
-
-    async fn get_last_applied_migration(
-        &mut self,
-        migration_table_name: &str,
-    ) -> Result<Option<Migration>, refinery_core::Error> {
-        let response = self
-            .0
-            .query(Self::get_last_applied_migration_query(migration_table_name).as_str())
-            .await;
-        match response {
-            Ok(mut response) => {
-                let errors = response.take_errors();
-                if !errors.is_empty() {
-                    let serr: SurrealError = errors.into();
-                    return Err(refinery_core::Error::from(serr));
-                };
-                let mut migrations: Vec<MigrationInner> = response.take(0).map_err(|err| {
-                    let serr: SurrealError = err.into();
-                    refinery_core::Error::from(serr)
-                })?;
-                if migrations.is_empty() {
-                    return Ok(None);
-                }
-                let m: Migration = migrations.pop().unwrap().into();
-                Ok(Some(m))
-            }
-            Err(err) => {
-                let serr: SurrealError = err.into();
-                return Err(serr.into());
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::{DateTime, Utc};
-    use surrealdb::engine::any::{self};
-
-    #[tokio::test]
-    async fn test_migration_connection() {
-        let connection = any::connect("mem://").await.unwrap();
-        connection.use_ns("test").await.unwrap();
-        connection.use_db("test").await.unwrap();
-        #[derive(SurrealValue, Debug)]
-        struct Example {
-            t: Option<DateTime<Utc>>,
-        }
-        let example = Example {
-            t: Some(Utc::now()),
-        };
-        let _res: Option<Example> = connection.create("example").content(example).await.unwrap();
-        let mut res = connection
-            .query("SELECT * FROM example ORDER BY version DESC;")
-            .await
-            .unwrap();
-        let errors = res.take_errors();
-        if !errors.is_empty() {
-            panic!("error getting examples from test db: {:?}", errors);
-        }
-        let examples: Vec<Example> = res.take(0).unwrap();
-        assert_eq!(examples.len(), 1);
+    fn get_last_applied_migration_query(migration_table_name: &str) -> String {
+        history::last_applied_migration(migration_table_name)
     }
 }
