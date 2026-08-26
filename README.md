@@ -28,7 +28,7 @@ The API is not yet stable. Expect breaking changes before `1.0.0`.
 
 ```toml
 [dependencies]
-surrealdb-refinery = "0.1"
+surrealdb-refinery = "0.2"
 surrealdb = "3.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -47,7 +47,7 @@ off by default, because a migration driver only needs the client API and
 
 ```toml
 # for an embedded database, or for mem:// in tests
-surrealdb-refinery = { version = "0.1", features = ["kv-mem"] }
+surrealdb-refinery = { version = "0.2", features = ["kv-mem"] }
 ```
 
 Available: `protocol-ws`, `protocol-http`, `kv-mem`, `kv-rocksdb`, `kv-surrealkv`.

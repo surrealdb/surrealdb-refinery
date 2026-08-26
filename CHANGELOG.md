@@ -1,8 +1,12 @@
 # Changelog
 
-## 0.1.1 — unreleased
+## 0.2.0 — 2026-08-26
 
 ### Changed
+
+This release changes no public API — it is a minor rather than a patch purely
+because the minimum supported Rust version rises, which breaks consumers on an
+older toolchain.
 
 - Dependencies updated; `surrealdb` moves to 3.2.4.
 - **The minimum supported Rust version is now 1.92**, up from 1.89. This is
