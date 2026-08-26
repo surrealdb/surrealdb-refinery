@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-08-25
 
 First release. Previously the crate was unpublishable: it depended on a git
 fork of refinery, which `cargo publish` refuses.
