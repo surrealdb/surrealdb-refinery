@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1 — unreleased
+
+### Changed
+
+- Dependencies updated; `surrealdb` moves to 3.2.4.
+- **The minimum supported Rust version is now 1.92**, up from 1.89. This is
+  forced by the dependency graph, not by this crate's own code: `surrealdb`
+  3.2.x pulls in `roaring` 0.11.5, which declares `rustc 1.90`, and `diskann`
+  0.54, which declares no minimum but does not compile before 1.92. Note that
+  `surrealdb` itself declares no `rust-version`, so this floor can move again
+  whenever its graph does.
+
 ## 0.1.0 — 2026-08-25
 
 First release. Previously the crate was unpublishable: it depended on a git
