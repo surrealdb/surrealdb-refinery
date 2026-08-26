@@ -36,7 +36,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 refinery's own types (`Runner`, `Migration`, `Report`, `Target`) are re-exported,
 so there is no need to depend on `refinery` or `refinery-core` directly.
 
-The minimum supported Rust version is 1.89.
+The minimum supported Rust version is 1.92.
 
 ### Features
 
