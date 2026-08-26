@@ -20,6 +20,10 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    # Boost Software License (not BUSL): xxhash-rust, via surrealkv under
+    # the kv-surrealkv feature. Do not prune as unused -- it only appears
+    # in the --all-features graph that CI checks.
+    "BSL-1.0",
     "CC0-1.0",
     # Used by the certificate-root data crates.
     "CDLA-Permissive-2.0",
@@ -53,6 +57,16 @@ license-files = [{ path = "LICENSE", hash = 0xbb1191d7 }]
 
 [[licenses.clarify]]
 crate = "surrealdb-types-derive"
+expression = "BUSL-1.1"
+license-files = [{ path = "LICENSE", hash = 0xbb1191d7 }]
+
+[[licenses.clarify]]
+crate = "surrealdb-collections"
+expression = "BUSL-1.1"
+license-files = [{ path = "LICENSE", hash = 0xbb1191d7 }]
+
+[[licenses.clarify]]
+crate = "surrealdb-strand"
 expression = "BUSL-1.1"
 license-files = [{ path = "LICENSE", hash = 0xbb1191d7 }]
 
