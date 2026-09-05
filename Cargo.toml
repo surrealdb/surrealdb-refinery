@@ -11,13 +11,12 @@ edition = "2024"
 # accepts every later 3.x release.
 surrealdb-types = { version = ">=3.3.0-beta.3, <4" }
 surrealdb-core = { version = ">=3.3.0-beta.3, <4" }
-surrealdb = { version = ">=3.3.0-beta.3, <4", features = [
-    "kv-mem",
-    "kv-rocksdb",
-    "kv-surrealkv",
-    "protocol-ws",
-    "protocol-http",
-] }
+# No engine or protocol features. This crate is a migration driver: it runs
+# against whatever `Surreal<Any>` the caller hands it and never opens a
+# connection of its own outside tests, so the consumer decides which engines to
+# link. Enabling them here forced every consumer to compile all three key-value
+# engines, RocksDB included, because Cargo unifies features across the graph.
+surrealdb = { version = ">=3.3.0-beta.3, <4", default-features = false }
 serde_json = "1.0.143"
 serde = { version = "1.0.219", features = ["derive"] }
 log = "0.4.14"
@@ -34,17 +33,10 @@ async-trait = "0.1.89"
 
 
 [dev-dependencies]
+# The tests connect to `mem://`, so they need the in-process engine that the
+# dependency above deliberately leaves to the consumer.
+surrealdb = { version = ">=3.3.0-beta.3, <4", features = ["kv-mem"] }
 env_logger = "0.11.8"
 maplit = "1.0.2"
 serde_json = "1.0.143"
 testing_logger = "0.1.1"
-
-# [features]
-# surrealdb = [
-#     "surrealdb/kv-mem",
-#     "surrealdb/kv-rocksdb",
-#     "surrealdb/kv-surrealkv",
-#     "surrealdb/protocol-http",
-#     "surrealdb/protocol-ws",
-#     "surrealdb/rustls",
-# ]
