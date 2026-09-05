@@ -3,9 +3,15 @@ name = "surrealdb_refinery"
 edition = "2024"
 [dependencies]
 
-surrealdb-types = { version = "3.0.0" }
-surrealdb-core = { version = "3.0.0" }
-surrealdb = { version = "3.0.0", features = [
+# The lower bounds name a pre-release deliberately. Cargo matches a pre-release
+# version only against a comparator that carries one on the same
+# major.minor.patch, so a plain `3.0.0` here can never resolve against the 3.3
+# pre-release line, whatever the consumer asks for. Naming `3.3.0-beta.3` is
+# what lets a consumer on that line depend on this crate at all; it still
+# accepts every later 3.x release.
+surrealdb-types = { version = ">=3.3.0-beta.3, <4" }
+surrealdb-core = { version = ">=3.3.0-beta.3, <4" }
+surrealdb = { version = ">=3.3.0-beta.3, <4", features = [
     "kv-mem",
     "kv-rocksdb",
     "kv-surrealkv",
