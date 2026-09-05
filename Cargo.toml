@@ -10,7 +10,6 @@ edition = "2024"
 # what lets a consumer on that line depend on this crate at all; it still
 # accepts every later 3.x release.
 surrealdb-types = { version = ">=3.3.0-beta.3, <4" }
-surrealdb-core = { version = ">=3.3.0-beta.3, <4" }
 # No engine or protocol features. This crate is a migration driver: it runs
 # against whatever `Surreal<Any>` the caller hands it and never opens a
 # connection of its own outside tests, so the consumer decides which engines to
