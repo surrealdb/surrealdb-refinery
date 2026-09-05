@@ -24,8 +24,13 @@ kv-rocksdb = ["surrealdb/kv-rocksdb"]
 kv-surrealkv = ["surrealdb/kv-surrealkv"]
 
 [dependencies]
-surrealdb = { version = "3.0.0", default-features = false }
-surrealdb-types = "3.0.0"
+# The lower bound names a pre-release deliberately. Cargo matches a pre-release
+# version only against a comparator that carries one, so a plain `3.0.0` here
+# can never resolve against the 3.3 pre-release line, whatever the consumer
+# asks for. Naming `3.3.0-beta.3` is what lets a consumer on that line depend
+# on this crate at all; it still accepts every later 3.x release.
+surrealdb = { version = ">=3.3.0-beta.3, <4", default-features = false }
+surrealdb-types = ">=3.3.0-beta.3, <4"
 refinery-core = { version = "0.9", features = ["futures"] }
 async-trait = "0.1.89"
 log = "0.4.14"
@@ -34,5 +39,5 @@ time = "0.3.47"
 [dev-dependencies]
 # `kv-mem` is enabled here so the test suite can use `mem://` without forcing
 # an embedded engine on library consumers.
-surrealdb = { version = "3.0.0", features = ["kv-mem"] }
+surrealdb = { version = ">=3.3.0-beta.3, <4", features = ["kv-mem"] }
 tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }
