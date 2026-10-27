@@ -3,19 +3,17 @@ name = "surrealdb_refinery"
 edition = "2024"
 [dependencies]
 
-# The lower bounds name a pre-release deliberately. Cargo matches a pre-release
-# version only against a comparator that carries one on the same
-# major.minor.patch, so a plain `3.0.0` here can never resolve against the 3.3
-# pre-release line, whatever the consumer asks for. Naming `3.3.0-beta.3` is
-# what lets a consumer on that line depend on this crate at all; it still
-# accepts every later 3.x release.
-surrealdb-types = { version = ">=3.3.0-beta.3, <4" }
+# Pinned to the same surrealdb-private revision as the consumer, so Cargo
+# resolves one `surrealdb` package and the `Surreal<Any>` the caller hands in is
+# the type this crate names. This is the 4.0 SDK line, which speaks to both 3.3
+# and 4.0 servers.
+surrealdb-types = { git = "https://github.com/surrealdb/surrealdb-private.git", rev = "05e18719e2338911090a6d20950862dee702eafe" }
 # No engine or protocol features. This crate is a migration driver: it runs
 # against whatever `Surreal<Any>` the caller hands it and never opens a
 # connection of its own outside tests, so the consumer decides which engines to
 # link. Enabling them here forced every consumer to compile all three key-value
 # engines, RocksDB included, because Cargo unifies features across the graph.
-surrealdb = { version = ">=3.3.0-beta.3, <4", default-features = false }
+surrealdb = { git = "https://github.com/surrealdb/surrealdb-private.git", rev = "05e18719e2338911090a6d20950862dee702eafe", default-features = false }
 serde_json = "1.0.143"
 serde = { version = "1.0.219", features = ["derive"] }
 log = "0.4.14"
@@ -34,7 +32,7 @@ async-trait = "0.1.89"
 [dev-dependencies]
 # The tests connect to `mem://`, so they need the in-process engine that the
 # dependency above deliberately leaves to the consumer.
-surrealdb = { version = ">=3.3.0-beta.3, <4", features = ["kv-mem"] }
+surrealdb = { git = "https://github.com/surrealdb/surrealdb-private.git", rev = "05e18719e2338911090a6d20950862dee702eafe", features = ["kv-mem"] }
 env_logger = "0.11.8"
 maplit = "1.0.2"
 serde_json = "1.0.143"
