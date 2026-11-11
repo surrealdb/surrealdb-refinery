@@ -1,0 +1,8 @@
+[env]
+# Debug test binaries run SurrealDB's embedded engine in-process, and on the 4.x
+# line its unoptimized query-execution frames need more than the 2 MiB Rust
+# gives a spawned thread: without this every test aborts with a stack overflow.
+# Release builds fit in the default, so this is a debug-frame-size floor, not a
+# requirement on consumers. Not `force`d, so an explicit RUST_MIN_STACK in the
+# environment still wins.
+RUST_MIN_STACK = "8388608"
